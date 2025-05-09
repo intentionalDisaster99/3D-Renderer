@@ -38,7 +38,8 @@ public class GUI {
 				// This is where the rendering happens
 				// wireTetrahedron(g2, pitchSlider, yawSlider);
 				// tetrahedron(g2, pitchSlider, yawSlider, getWidth(), getHeight());
-				tetrahedronWithShading(g2, pitchSlider, yawSlider, getWidth(), getHeight());
+				// tetrahedronWithShading(g2, pitchSlider, yawSlider, getWidth(), getHeight());
+				sphereish(g2, pitchSlider, yawSlider, getWidth(), getHeight(), 6);
 
 
 			}
@@ -340,17 +341,171 @@ public class GUI {
 	public static Color getShade(Color color, double shade) {
 
 		// This is just an approximation for sRGB to linear RGB and back (Java uses sRGB)
-		
+
 		double redLinear = Math.pow(color.getRed(), 2.4) * shade;
 		double greenLinear = Math.pow(color.getGreen(), 2.4) * shade;
 		double blueLinear = Math.pow(color.getBlue(), 2.4) * shade;
-	
-		int red = (int) Math.pow(redLinear, 1/2.4);
-		int green = (int) Math.pow(greenLinear, 1/2.4);
-		int blue = (int) Math.pow(blueLinear, 1/2.4);
-	
+
+		int red = (int) Math.pow(redLinear, 1 / 2.4);
+		int green = (int) Math.pow(greenLinear, 1 / 2.4);
+		int blue = (int) Math.pow(blueLinear, 1 / 2.4);
+
 		return new Color(red, green, blue);
 	}
+
+	// Shows a bit of a sphere by subdividing the trianlges
+	static void sphereish(Graphics2D g2, JSlider pitchSlider, JSlider yawSlider, double width,
+			double height, int sphericity) {
+
+		// This uses a buffered image, which is fun
+		// We have to use barycentric coordinates, but I didn't go too far into it because
+		// people have already done the math, why should I do it again? (I'll look into it more later I'm sure)
+		BufferedImage img = new BufferedImage((int) width, (int) height, BufferedImage.TYPE_INT_ARGB);
+
+		// The same triangles as before
+		ArrayList<Triangle> triangles = new ArrayList<>();
+		triangles.add(new Triangle(new Vertex(100, 100, 100),
+				new Vertex(-100, -100, 100),
+				new Vertex(-100, 100, -100),
+				Color.WHITE));
+		triangles.add(new Triangle(new Vertex(100, 100, 100),
+				new Vertex(-100, -100, 100),
+				new Vertex(100, -100, -100),
+				Color.RED));
+		triangles.add(new Triangle(new Vertex(-100, 100, -100),
+				new Vertex(100, -100, -100),
+				new Vertex(100, 100, 100),
+				Color.GREEN));
+		triangles.add(new Triangle(new Vertex(-100, 100, -100),
+				new Vertex(100, -100, -100),
+				new Vertex(-100, -100, 100),
+				Color.BLUE));
+
+		// Same transforms as before
+		double yaw = Math.toRadians(yawSlider.getValue());
+		Matrix3 yawTransform = new Matrix3(new double[] {
+				Math.cos(yaw), 0, -Math.sin(yaw),
+				0, 1, 0,
+				Math.sin(yaw), 0, Math.cos(yaw)
+		});
+		double pitch = Math.toRadians(pitchSlider.getValue());
+		Matrix3 pitchTransform = new Matrix3(new double[] {
+				1, 0, 0,
+				0, Math.cos(pitch), Math.sin(pitch),
+				0, -Math.sin(pitch), Math.cos(pitch)
+		});
+		Matrix3 transform = yawTransform.multiply(pitchTransform);
+
+		// Making a depth buffer so that we know what to show at the frong
+		double[] depthBuffer = new double[img.getWidth() * img.getHeight()];
+		// initialize array with extremely far away depths
+		for (int q = 0; q < depthBuffer.length; q++) {
+			depthBuffer[q] = Double.NEGATIVE_INFINITY;
+		}
+
+		// Inflating our triangles
+		for (int i = 0; i < sphericity; i++) {
+			triangles = inflate(triangles);
+		}
+
+		// Iterating to show each triangle
+		for (Triangle t : triangles) {
+
+			Vertex v1 = transform.transform(t.v1);
+			Vertex v2 = transform.transform(t.v2);
+			Vertex v3 = transform.transform(t.v3);
+
+			// Doing the fun translations because we can't just translate to the center now
+			// We are drawing an image so we need to move ot the center of the image
+			v1.x += width / 2;
+			v1.y += height / 2;
+			v2.x += width / 2;
+			v2.y += height / 2;
+			v3.x += width / 2;
+			v3.y += height / 2;
+
+			// Doing fun mathy stuff to figure out the bounds for each triangle
+			int minX = (int) Math.max(0, Math.ceil(Math.min(v1.x, Math.min(v2.x, v3.x))));
+			int maxX = (int) Math.min(img.getWidth() - 1,
+					Math.floor(Math.max(v1.x, Math.max(v2.x, v3.x))));
+			int minY = (int) Math.max(0, Math.ceil(Math.min(v1.y, Math.min(v2.y, v3.y))));
+			int maxY = (int) Math.min(img.getHeight() - 1,
+					Math.floor(Math.max(v1.y, Math.max(v2.y, v3.y))));
+
+			// Now to calculate the area of the triangle
+			double area = (v1.y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - v1.x);
+
+			// A bit of a better normal calculation
+			Vertex edge1 = new Vertex(t.v2.x - t.v1.x, t.v2.y - t.v1.y, t.v2.z - t.v1.z);
+			Vertex edge2 = new Vertex(t.v3.x - t.v1.x, t.v3.y - t.v1.y, t.v3.z - t.v1.z);
+
+			// Compute the normal vector using the cross product
+			Vertex norm = new Vertex(
+				edge1.y * edge2.z - edge1.z * edge2.y,
+				edge1.z * edge2.x - edge1.x * edge2.z,
+				edge1.x * edge2.y - edge1.y * edge2.x
+			);
+			// Normalize the normal vector
+			double normalLength = Math.sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z);
+			if (normalLength != 0) {
+				norm.x /= normalLength;
+				norm.y /= normalLength;
+				norm.z /= normalLength;
+			}
+
+			double angleCos = Math.abs(norm.z);
+
+			// Iterating to change the color of each one on the image
+			for (int y = minY; y <= maxY; y++) {
+				for (int x = minX; x <= maxX; x++) {
+					double b1 = ((y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - x)) / area;
+					double b2 = ((y - v1.y) * (v3.x - v1.x) + (v3.y - v1.y) * (v1.x - x)) / area;
+					double b3 = ((y - v2.y) * (v1.x - v2.x) + (v1.y - v2.y) * (v2.x - x)) / area;
+					if (b1 >= 0 && b1 <= 1 && b2 >= 0 && b2 <= 1 && b3 >= 0 && b3 <= 1) {
+						// Checking to see if we should show it or not based on depth
+						double depth = b1 * v1.z + b2 * v2.z + b3 * v3.z;
+						int zIndex = y * img.getWidth() + x;
+						if (depthBuffer[zIndex] < depth) {
+							img.setRGB(x, y, getShade(t.color, angleCos).getRGB());
+							depthBuffer[zIndex] = depth;
+						}
+					}
+				}
+			}
+
+		}
+
+		// Actually drawing the thing
+		g2.drawImage(img, 0, 0, null);
+
+	}
+
+	// A method that inflates the tetrahedron by subdividing it until it looks a bit like a sphere
+	public static ArrayList<Triangle> inflate(ArrayList<Triangle> triangles) {
+		ArrayList<Triangle> result = new ArrayList<>();
+		for (Triangle t : triangles) {
+			Vertex m1 =
+				new Vertex((t.v1.x + t.v2.x)/2, (t.v1.y + t.v2.y)/2, (t.v1.z + t.v2.z)/2);
+			Vertex m2 =
+				new Vertex((t.v2.x + t.v3.x)/2, (t.v2.y + t.v3.y)/2, (t.v2.z + t.v3.z)/2);
+			Vertex m3 =
+				new Vertex((t.v1.x + t.v3.x)/2, (t.v1.y + t.v3.y)/2, (t.v1.z + t.v3.z)/2);
+			result.add(new Triangle(t.v1, m1, m3, t.color));
+			result.add(new Triangle(t.v2, m1, m2, t.color));
+			result.add(new Triangle(t.v3, m2, m3, t.color));
+			result.add(new Triangle(m1, m2, m3, t.color));
+		}
+		for (Triangle t : result) {
+			for (Vertex v : new Vertex[] { t.v1, t.v2, t.v3 }) {
+				double l = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) / Math.sqrt(30000);
+				v.x /= l;
+				v.y /= l;
+				v.z /= l;
+			}
+		}
+		return result;
+	}
+
 
 }
 
