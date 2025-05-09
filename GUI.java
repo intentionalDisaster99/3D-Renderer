@@ -37,7 +37,9 @@ public class GUI {
 
 				// This is where the rendering happens
 				// wireTetrahedron(g2, pitchSlider, yawSlider);
-				tetrahedron(g2, pitchSlider, yawSlider, getWidth(), getHeight());
+				// tetrahedron(g2, pitchSlider, yawSlider, getWidth(), getHeight());
+				tetrahedronWithShading(g2, pitchSlider, yawSlider, getWidth(), getHeight());
+
 
 			}
 
@@ -185,24 +187,21 @@ public class GUI {
 
 			// Doing fun mathy stuff to figure out the bounds for each triangle
 			int minX = (int) Math.max(0, Math.ceil(Math.min(v1.x, Math.min(v2.x, v3.x))));
-			int maxX = (int) Math.min(img.getWidth() - 1, 
-									Math.floor(Math.max(v1.x, Math.max(v2.x, v3.x))));
+			int maxX = (int) Math.min(img.getWidth() - 1,
+					Math.floor(Math.max(v1.x, Math.max(v2.x, v3.x))));
 			int minY = (int) Math.max(0, Math.ceil(Math.min(v1.y, Math.min(v2.y, v3.y))));
 			int maxY = (int) Math.min(img.getHeight() - 1,
-									Math.floor(Math.max(v1.y, Math.max(v2.y, v3.y))));
-									
+					Math.floor(Math.max(v1.y, Math.max(v2.y, v3.y))));
+
 			// Now to calculate the area of the triangle
 			double area = (v1.y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - v1.x);
 
 			// Iterating to change the color of each one on the image
 			for (int y = minY; y <= maxY; y++) {
 				for (int x = minX; x < maxX; x++) {
-					double b1 = 
-              			((y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - x)) / area;
-					double b2 =
-						((y - v1.y) * (v3.x - v1.x) + (v3.y - v1.y) * (v1.x - x)) / area;
-					double b3 =
-						((y - v2.y) * (v1.x - v2.x) + (v1.y - v2.y) * (v2.x - x)) / area;
+					double b1 = ((y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - x)) / area;
+					double b2 = ((y - v1.y) * (v3.x - v1.x) + (v3.y - v1.y) * (v1.x - x)) / area;
+					double b3 = ((y - v2.y) * (v1.x - v2.x) + (v1.y - v2.y) * (v2.x - x)) / area;
 					if (b1 >= 0 && b1 <= 1 && b2 >= 0 && b2 <= 1 && b3 >= 0 && b3 <= 1) {
 						// Checking to see if we should show it or not based on depth
 						double depth = b1 * v1.z + b2 * v2.z + b3 * v3.z;
@@ -216,12 +215,142 @@ public class GUI {
 			}
 
 		}
-		
+
 		// Actually drawing the thing
 		g2.drawImage(img, 0, 0, null);
 
 	}
+	
+	// Now it's on to shading so that it looks a bit more realistic
+	static void tetrahedronWithShading(Graphics2D g2, JSlider pitchSlider, JSlider yawSlider, double width,
+			double height) {
 
+		// This uses a buffered image, which is fun
+		// We have to use barycentric coordinates, but I didn't go too far into it because
+		// people have already done the math, why should I do it again? (I'll look into it more later I'm sure)
+		BufferedImage img = new BufferedImage((int) width, (int) height, BufferedImage.TYPE_INT_ARGB);
+
+		// The same triangles as before
+		ArrayList<Triangle> triangles = new ArrayList<>();
+		triangles.add(new Triangle(new Vertex(100, 100, 100),
+				new Vertex(-100, -100, 100),
+				new Vertex(-100, 100, -100),
+				Color.WHITE));
+		triangles.add(new Triangle(new Vertex(100, 100, 100),
+				new Vertex(-100, -100, 100),
+				new Vertex(100, -100, -100),
+				Color.RED));
+		triangles.add(new Triangle(new Vertex(-100, 100, -100),
+				new Vertex(100, -100, -100),
+				new Vertex(100, 100, 100),
+				Color.GREEN));
+		triangles.add(new Triangle(new Vertex(-100, 100, -100),
+				new Vertex(100, -100, -100),
+				new Vertex(-100, -100, 100),
+				Color.BLUE));
+
+		// Same transforms as before
+		double yaw = Math.toRadians(yawSlider.getValue());
+		Matrix3 yawTransform = new Matrix3(new double[] {
+				Math.cos(yaw), 0, -Math.sin(yaw),
+				0, 1, 0,
+				Math.sin(yaw), 0, Math.cos(yaw)
+		});
+		double pitch = Math.toRadians(pitchSlider.getValue());
+		Matrix3 pitchTransform = new Matrix3(new double[] {
+				1, 0, 0,
+				0, Math.cos(pitch), Math.sin(pitch),
+				0, -Math.sin(pitch), Math.cos(pitch)
+		});
+		Matrix3 transform = yawTransform.multiply(pitchTransform);
+
+		// Making a depth buffer so that we know what to show at the frong
+		double[] depthBuffer = new double[img.getWidth() * img.getHeight()];
+		// initialize array with extremely far away depths
+		for (int q = 0; q < depthBuffer.length; q++) {
+			depthBuffer[q] = Double.NEGATIVE_INFINITY;
+		}
+
+		// Iterating to show each triangle
+		for (Triangle t : triangles) {
+
+			Vertex v1 = transform.transform(t.v1);
+			Vertex v2 = transform.transform(t.v2);
+			Vertex v3 = transform.transform(t.v3);
+
+			// Doing the fun translations because we can't just translate to the center now
+			// We are drawing an image so we need to move ot the center of the image
+			v1.x += width / 2;
+			v1.y += height / 2;
+			v2.x += width / 2;
+			v2.y += height / 2;
+			v3.x += width / 2;
+			v3.y += height / 2;
+
+			// Doing fun mathy stuff to figure out the bounds for each triangle
+			int minX = (int) Math.max(0, Math.ceil(Math.min(v1.x, Math.min(v2.x, v3.x))));
+			int maxX = (int) Math.min(img.getWidth() - 1,
+					Math.floor(Math.max(v1.x, Math.max(v2.x, v3.x))));
+			int minY = (int) Math.max(0, Math.ceil(Math.min(v1.y, Math.min(v2.y, v3.y))));
+			int maxY = (int) Math.min(img.getHeight() - 1,
+					Math.floor(Math.max(v1.y, Math.max(v2.y, v3.y))));
+
+			// Now to calculate the area of the triangle
+			double area = (v1.y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - v1.x);
+
+			// Calculating the normal so that we can shade things 
+			Vertex norm = new Vertex(
+					v3.y * v2.z - v3.z * v2.y,
+					v3.z * v2.x - v3.x * v2.z,
+					v3.x * v2.y - v3.y * v2.x);
+			// Normalizing the normal heh
+			double normalLength = Math.sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z);
+			norm.x /= normalLength;
+			norm.y /= normalLength;
+			norm.z /= normalLength;
+
+			double angleCos = Math.abs(norm.z);
+
+			// Iterating to change the color of each one on the image
+			for (int y = minY; y <= maxY; y++) {
+				for (int x = minX; x < maxX; x++) {
+					double b1 = ((y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - x)) / area;
+					double b2 = ((y - v1.y) * (v3.x - v1.x) + (v3.y - v1.y) * (v1.x - x)) / area;
+					double b3 = ((y - v2.y) * (v1.x - v2.x) + (v1.y - v2.y) * (v2.x - x)) / area;
+					if (b1 >= 0 && b1 <= 1 && b2 >= 0 && b2 <= 1 && b3 >= 0 && b3 <= 1) {
+						// Checking to see if we should show it or not based on depth
+						double depth = b1 * v1.z + b2 * v2.z + b3 * v3.z;
+						int zIndex = y * img.getWidth() + x;
+						if (depthBuffer[zIndex] < depth) {
+							img.setRGB(x, y, getShade(t.color, angleCos).getRGB());
+							depthBuffer[zIndex] = depth;
+						}
+					}
+				}
+			}
+
+		}
+
+		// Actually drawing the thing
+		g2.drawImage(img, 0, 0, null);
+
+	}
+	
+	// A function to return the color based on the angle between the normal and the light source
+	public static Color getShade(Color color, double shade) {
+
+		// This is just an approximation for sRGB to linear RGB and back (Java uses sRGB)
+		
+		double redLinear = Math.pow(color.getRed(), 2.4) * shade;
+		double greenLinear = Math.pow(color.getGreen(), 2.4) * shade;
+		double blueLinear = Math.pow(color.getBlue(), 2.4) * shade;
+	
+		int red = (int) Math.pow(redLinear, 1/2.4);
+		int green = (int) Math.pow(greenLinear, 1/2.4);
+		int blue = (int) Math.pow(blueLinear, 1/2.4);
+	
+		return new Color(red, green, blue);
+	}
 
 }
 
