@@ -3,6 +3,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.ArrayList;
 import java.awt.geom.Path2D;
+import java.awt.image.BufferedImage;
 
 
 // The gui that we are drawing
@@ -34,11 +35,9 @@ public class GUI {
 				g2.setColor(Color.BLACK);
 				g2.fillRect(0, 0, getWidth(), getHeight());
 
-				// Moving to the center of the screen
-				g2.translate(getWidth() / 2, getHeight() / 2);
-
 				// This is where the rendering happens
-				tetrahedron(g2, pitchSlider, yawSlider);
+				// wireTetrahedron(g2, pitchSlider, yawSlider);
+				tetrahedron(g2, pitchSlider, yawSlider, getWidth(), getHeight());
 
 			}
 
@@ -59,42 +58,45 @@ public class GUI {
 
 
 	// Here are the different examples that I am writing
-	static void tetrahedron(Graphics2D g2, JSlider pitchSlider, JSlider yawSlider) {
+	static void wireTetrahedron(Graphics2D g2, JSlider pitchSlider, JSlider yawSlider, double width, double height) {
+
+		// Moving to the center of the screen
+		g2.translate(width / 2, height / 2);
 
 		ArrayList<Triangle> triangles = new ArrayList<>();
 
 		triangles.add(new Triangle(new Vertex(100, 100, 100),
-                      			   new Vertex(-100, -100, 100),
-                    			   new Vertex(-100, 100, -100),
-                      Color.WHITE));
+				new Vertex(-100, -100, 100),
+				new Vertex(-100, 100, -100),
+				Color.WHITE));
 		triangles.add(new Triangle(new Vertex(100, 100, 100),
-                    		       new Vertex(-100, -100, 100),
-                   			       new Vertex(100, -100, -100),
-                      Color.RED));
+				new Vertex(-100, -100, 100),
+				new Vertex(100, -100, -100),
+				Color.RED));
 		triangles.add(new Triangle(new Vertex(-100, 100, -100),
-								   new Vertex(100, -100, -100),
-                  			       new Vertex(100, 100, 100),
-                  			       Color.GREEN));
+				new Vertex(100, -100, -100),
+				new Vertex(100, 100, 100),
+				Color.GREEN));
 		triangles.add(new Triangle(new Vertex(-100, 100, -100),
-                    			   new Vertex(100, -100, -100),
-                    			   new Vertex(-100, -100, 100),
-								   Color.BLUE));
-								   
+				new Vertex(100, -100, -100),
+				new Vertex(-100, -100, 100),
+				Color.BLUE));
+
 		// Updating the pitch and yaw of the tetrahedron
 		double yaw = Math.toRadians(yawSlider.getValue());
 		Matrix3 yawTransform = new Matrix3(new double[] {
-			Math.cos(yaw), 0, -Math.sin(yaw),
-			0, 1, 0,
-			Math.sin(yaw), 0, Math.cos(yaw)
+				Math.cos(yaw), 0, -Math.sin(yaw),
+				0, 1, 0,
+				Math.sin(yaw), 0, Math.cos(yaw)
 		});
 		double pitch = Math.toRadians(pitchSlider.getValue());
 		Matrix3 pitchTransform = new Matrix3(new double[] {
 				1, 0, 0,
 				0, Math.cos(pitch), Math.sin(pitch),
 				0, -Math.sin(pitch), Math.cos(pitch)
-			});
+		});
 		Matrix3 transform = yawTransform.multiply(pitchTransform);
-	
+
 		// Actually drawing the lines between each vertex
 		g2.setColor(Color.WHITE);
 		for (Triangle t : triangles) {
@@ -113,9 +115,112 @@ public class GUI {
 			g2.draw(path);
 		}
 
+	}
+	
 
+	// A prettier tetrahedron while I figure out how to draw triangles
+	static void tetrahedron(Graphics2D g2, JSlider pitchSlider, JSlider yawSlider, double width, double height) {
 
-	}	
+		// This uses a buffered image, which is fun
+		// We have to use barycentric coordinates, but I didn't go too far into it because
+		// people have already done the math, why should I do it again? (I'll look into it more later I'm sure)
+		BufferedImage img = new BufferedImage((int) width, (int) height, BufferedImage.TYPE_INT_ARGB);
+
+		// The same triangles as before
+		ArrayList<Triangle> triangles = new ArrayList<>();
+		triangles.add(new Triangle(new Vertex(100, 100, 100),
+				new Vertex(-100, -100, 100),
+				new Vertex(-100, 100, -100),
+				Color.WHITE));
+		triangles.add(new Triangle(new Vertex(100, 100, 100),
+				new Vertex(-100, -100, 100),
+				new Vertex(100, -100, -100),
+				Color.RED));
+		triangles.add(new Triangle(new Vertex(-100, 100, -100),
+				new Vertex(100, -100, -100),
+				new Vertex(100, 100, 100),
+				Color.GREEN));
+		triangles.add(new Triangle(new Vertex(-100, 100, -100),
+				new Vertex(100, -100, -100),
+				new Vertex(-100, -100, 100),
+				Color.BLUE));
+
+		// Same transforms as before
+		double yaw = Math.toRadians(yawSlider.getValue());
+		Matrix3 yawTransform = new Matrix3(new double[] {
+				Math.cos(yaw), 0, -Math.sin(yaw),
+				0, 1, 0,
+				Math.sin(yaw), 0, Math.cos(yaw)
+		});
+		double pitch = Math.toRadians(pitchSlider.getValue());
+		Matrix3 pitchTransform = new Matrix3(new double[] {
+				1, 0, 0,
+				0, Math.cos(pitch), Math.sin(pitch),
+				0, -Math.sin(pitch), Math.cos(pitch)
+		});
+		Matrix3 transform = yawTransform.multiply(pitchTransform);
+
+		// Making a depth buffer so that we know what to show at the frong
+		double[] depthBuffer = new double[img.getWidth() * img.getHeight()];
+		// initialize array with extremely far away depths
+		for (int q = 0; q < depthBuffer.length; q++) {
+			depthBuffer[q] = Double.NEGATIVE_INFINITY;
+		}
+
+		// Iterating to show each triangle
+		for (Triangle t : triangles) {
+
+			Vertex v1 = transform.transform(t.v1);
+			Vertex v2 = transform.transform(t.v2);
+			Vertex v3 = transform.transform(t.v3);
+
+			// Doing the fun translations because we can't just translate to the center now
+			// We are drawing an image so we need to move ot the center of the image
+			v1.x += width / 2;
+			v1.y += height / 2;
+			v2.x += width / 2;
+			v2.y += height / 2;
+			v3.x += width / 2;
+			v3.y += height / 2;
+
+			// Doing fun mathy stuff to figure out the bounds for each triangle
+			int minX = (int) Math.max(0, Math.ceil(Math.min(v1.x, Math.min(v2.x, v3.x))));
+			int maxX = (int) Math.min(img.getWidth() - 1, 
+									Math.floor(Math.max(v1.x, Math.max(v2.x, v3.x))));
+			int minY = (int) Math.max(0, Math.ceil(Math.min(v1.y, Math.min(v2.y, v3.y))));
+			int maxY = (int) Math.min(img.getHeight() - 1,
+									Math.floor(Math.max(v1.y, Math.max(v2.y, v3.y))));
+									
+			// Now to calculate the area of the triangle
+			double area = (v1.y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - v1.x);
+
+			// Iterating to change the color of each one on the image
+			for (int y = minY; y <= maxY; y++) {
+				for (int x = minX; x < maxX; x++) {
+					double b1 = 
+              			((y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - x)) / area;
+					double b2 =
+						((y - v1.y) * (v3.x - v1.x) + (v3.y - v1.y) * (v1.x - x)) / area;
+					double b3 =
+						((y - v2.y) * (v1.x - v2.x) + (v1.y - v2.y) * (v2.x - x)) / area;
+					if (b1 >= 0 && b1 <= 1 && b2 >= 0 && b2 <= 1 && b3 >= 0 && b3 <= 1) {
+						// Checking to see if we should show it or not based on depth
+						double depth = b1 * v1.z + b2 * v2.z + b3 * v3.z;
+						int zIndex = y * img.getWidth() + x;
+						if (depthBuffer[zIndex] < depth) {
+							img.setRGB(x, y, t.color.getRGB());
+							depthBuffer[zIndex] = depth;
+						}
+					}
+				}
+			}
+
+		}
+		
+		// Actually drawing the thing
+		g2.drawImage(img, 0, 0, null);
+
+	}
 
 
 }
